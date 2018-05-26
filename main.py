@@ -16,27 +16,27 @@ GX_BIAS = 0.02
 GY_BIAS = 0.01
 GZ_BIAS = 0.01
 
-AX_BIAS = 0.1962
-AY_BIAS = 0.1962
-AZ_BIAS = 0
+AX_BIAS = 0.1
+AY_BIAS = 0.1
+AZ_BIAS = 0.1
 
 # standard deviation of sensors - educated guess
-sigma_accel = 4.0
-sigma_gyro = 2.0
-sigma_baro = 2.0
+sigma_accel = 0.02
+sigma_gyro = 0.02
+sigma_baro = 10.0
 
 # gravity in m/s^2 
 g = 9.81
 
 # more guesses - it has to be less that one for sure (I think)
-ca = 0.5
+ca = 0.1
 
 # gain of complementary filter
 Kc = np.array([(2*(sigma_accel/sigma_baro))**0.5, sigma_accel/sigma_baro]) 
 
 # Serial parameters
-PORT = '/dev/ttyACM0'
-BAUDRATE = 9600
+#PORT = '/dev/ttyACM0'
+#BAUDRATE = 115200
 
 
 def skew(v):
@@ -76,19 +76,20 @@ def calibrate(baro, ground_pressure, HISTORY, count):
 	return False, millibars_to_meters(ground_pressure/8), ground_pressure, HISTORY
 
 
-def get_sensor_data(serial_obj):
+def get_sensor_data(data_file):
 	"""
 	Get accel, gyro and barometer data from serial
 	"""
-	raw_data = serial_obj.readline().rstrip().split(",")
+	raw_data = data_file.readline().rstrip().split(",")
 	data = map(float, raw_data)
 	# split into gyro and accel readings
 	accel = np.array(data[:3])*g - np.array([AX_BIAS, AY_BIAS, AZ_BIAS])
 	# account for gyro bias
 	gyro = np.array(data[3:6]) - np.array([GX_BIAS, GY_BIAS, GZ_BIAS])
 	# pressure
-	baro = data[-1]
-	return accel, gyro, baro
+	baro = data[-2]
+	timestamp = data[-1]
+	return accel, gyro, baro, timestamp
 
 
 def get_prediction_covariance(v, t, sigma):
@@ -145,10 +146,10 @@ def update_error_covariance(P, H, K):
 
 
 # serial communication object
-serial_com = serial.Serial(PORT, BAUDRATE)
+#serial_com = serial.Serial(PORT, BAUDRATE)
 
 # Initialize needed variables
-prev_time = time.time()
+#prev_time = time.time()
 ZUPT_counter = 0
 z = np.array([0, 0, 1]) # assume earth and body frame have same orientation
 a = np.array([0, 0, 0]) # the components of the acceleration are all 0
@@ -168,39 +169,45 @@ a_earth_prev = 0
 # form kalman filter
 z_prev = z
 
+f = open('data_set.txt','r')
+prev_time = 1266985261
+curr_time = 0
+
 while True:
 
 	# get new sensor data
-	accel, gyro, baro = get_sensor_data(serial_com)
+	accel, gyro, baro, curr_time = get_sensor_data(f)
+	# print accel, gyro, baro, curr_time
 	if not calibrated:
 		calibrated, ground_height, ground_pressure, HISTORY = calibrate(baro, ground_pressure, HISTORY, count)
 		h = 0
 		count += 1
 	# Calculate sampling time
-	curr_time = time.time()
-	T = curr_time - prev_time
-
+	#curr_time = time.time()
+	# T = (curr_time - prev_time) / 1000000.0
+	T = 0.01
+	#T = 0.02 # 50 Hz
 
 	# Kalman filter for vertical acceleration estimation
 
 	# Prediction update with data from previous iteration and sensorss
 	z = predict_state(gyro, z, T) # State prediction
-	z /= la.norm(z)
+	#z /= la.norm(z)
 	P = predict_error_covariance(gyro_prev, z_prev, T, P, sigma_gyro)
 	# Measurement update
 	K = update_kalman_gain(P, H, ca, a, sigma_accel)
 	measurement = accel - ca*a
 	z = update_state_with_measurement(z, K, measurement, H)
 	P = update_error_covariance(P, H, K)
-	z /= la.norm(z)	
+	#z /= la.norm(z)	
 	# compute the acceleration from the estimated value of z
 	a = accel - g*z
 	# print the data for debugging purposes
 	# print "angle: " + str(vector_angle(z, np.array([0, 0, 1])))
 	# Acceeration in earth reference frame
-	#print z
+	# print z
 	a_earth = a.dot(z)
-	#print accel, a, a_earth
+	# print accel, a, a_earth
 
 
 	# Complementary filter for altitude and vertical velocity estimation
@@ -220,7 +227,7 @@ while True:
 	        	np.array([[1, T/2],[0, 1]]).dot(Kc)*T*(millibars_to_meters(baro_prev, ground_height) - h) + \
 	        np.array([T/2, 1])*T*a_earth_prev
 	h, v = state
-	print h*100
+	print h*100, millibars_to_meters(baro_prev, ground_height)*100
 	# complementary filter estimates from values of previous measurements
 	baro_prev = baro
 	a_earth_prev = a_earth
