@@ -15,8 +15,8 @@ ax1.set_title("Altitude estimation")
 ax1.set_xlabel('Sample')
 ax1.set_ylabel('Altitude')
 
-ax1.plot(est, c='b', label='algo')
 ax1.plot(baro, c='r', label='baro')
+ax1.plot(est, c='b', label='two step')
 
 leg = ax1.legend()
 
